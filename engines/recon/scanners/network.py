@@ -1,41 +1,60 @@
 import socket
-import concurrent.futures
+import re
+from system.tools import check_installed_tools, run_cmd
 
-COMMON_PORTS = {
-    21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS",
-    80: "HTTP", 110: "POP3", 139: "NetBIOS", 443: "HTTPS", 445: "SMB",
-    1433: "MSSQL", 1521: "Oracle", 3306: "MySQL", 3389: "RDP",
-    5432: "PostgreSQL", 8080: "HTTP-Proxy", 8443: "HTTPS-Alt"
-}
+COMMON_PORTS = [21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 1433, 3306, 3389, 8080, 8443]
 
-def scan_port(ip, port, timeout=1.0):
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(timeout)
-            res = s.connect_ex((ip, port))
-            if res == 0:
-                service = COMMON_PORTS.get(port, "Unknown")
+def scan_target(target_ip):
+    """Scan hybride : utilise Nmap pro si disponible, sinon fallback sockets Python."""
+    tools = check_installed_tools()
+    results = []
+
+    # MODE 1 : Utilisation de Nmap (Mode Professionnel)
+    if tools["nmap"]:
+        ports_str = ",".join(map(str, COMMON_PORTS))
+        raw_output = run_cmd(["nmap", "-sV", "-p", ports_str, "--open", target_ip], timeout=45)
+        if raw_output:
+            for line in raw_output.splitlines():
+                match = re.search(r"^(\d+)/(tcp|udp)\s+open\s+([\w\-\.]+)\s*(.*)", line)
+                if match:
+                    port = int(match.group(1))
+                    service = match.group(3)
+                    banner = match.group(4).strip() or service
+                    results.append({
+                        "port": port,
+                        "state": "open",
+                        "service": service,
+                        "banner": banner,
+                        "engine": "Nmap (Native Binary)"
+                    })
+            if results:
+                return results
+
+    # MODE 2 : Fallback Sockets Python (Mode Secours / Zero-dependency)
+    for port in COMMON_PORTS:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.8)
+            code = sock.connect_ex((target_ip, port))
+            if code == 0:
+                service = "http" if port in [80, 8080] else "https" if port in [443, 8443] else "unknown"
                 banner = ""
                 try:
-                    s.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
-                    banner = s.recv(256).decode("utf-8", errors="ignore").strip().split("\n")[0]
+                    if port in [80, 8080, 443]:
+                        sock.sendall(b"HEAD / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    banner = sock.recv(256).decode('utf-8', errors='ignore').strip().split("\r\n")[0]
                 except Exception:
                     pass
-                return {"port": port, "service": service, "state": "OPEN", "banner": banner}
-    except Exception:
-        pass
-    return None
-
-def scan_target(target_ip, ports=None, max_threads=20):
-    if ports is None:
-        ports = list(COMMON_PORTS.keys())
-        
-    open_ports = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
-        futures = [executor.submit(scan_port, target_ip, p) for p in ports]
-        for f in concurrent.futures.as_completed(futures):
-            res = f.result()
-            if res:
-                open_ports.append(res)
                 
-    return sorted(open_ports, key=lambda x: x["port"])
+                results.append({
+                    "port": port,
+                    "state": "open",
+                    "service": service,
+                    "banner": banner or f"Port {port} Ouvert",
+                    "engine": "Python Socket (Fallback)"
+                })
+            sock.close()
+        except Exception:
+            pass
+
+    return results

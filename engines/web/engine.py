@@ -2,68 +2,66 @@ import time
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from .fuzzers.headers import analyze_headers
-from .fuzzers.dir_fuzz import fuzz_directories
+from .scanners.web_vuln import run_nikto_scan, run_sqlmap_scan
 
 console = Console()
 
 class WebEngine:
     def __init__(self, target):
-        if not target.startswith("http://") and not target.startswith("https://"):
-            self.target = "http://" + target
-        else:
-            self.target = target
+        self.target = target.strip()
+        if not self.target.startswith("http://") and not self.target.startswith("https://"):
+            self.target = "http://" + self.target
 
     def run_full_scan(self):
         start_time = time.time()
 
         console.print(Panel(
-            f"[bold cyan]Cible Web :[/bold cyan] [bold yellow]{self.target}[/bold yellow]",
-            title="[bold red]THEA-OS - ENGINE WEB & FUZZING[/bold red]",
-            subtitle="[dim]Web Audit & Path Discovery[/dim]",
+            f"[bold cyan]Cible Audit Web Hybride :[/bold cyan] [bold yellow]{self.target}[/bold yellow]",
+            title="[bold red]THEA-OS - ENGINE WEB (PRO HYBRID)[/bold red]",
+            subtitle="[dim]Application Vulnerabilities & SQL Injection Audit[/dim]",
             expand=False
         ))
 
-        # 1. Analyse des en-tetes
-        with console.status("[bold green]Analyse des en-tetes & Stack Tech...", spinner="dots"):
-            header_res = analyze_headers(self.target)
+        # 1. Audit Nikto
+        console.print("\n  [bold cyan][+][/bold cyan] Lancement du scan applicatif (Nikto / Headers)...")
+        with console.status("[bold green]Analyse des failles web en cours...", spinner="dots"):
+            nikto_res = run_nikto_scan(self.target)
 
-        if "error" in header_res:
-            console.print(f"[bold red][!] Echec de connexion : {header_res['error']}[/bold red]")
-            return None
+        t_nikto = Table(title="[bold gold1]VULNERABILITES APPLICATIVES WEB[/bold gold1]", border_style="bright_blue")
+        t_nikto.add_column("TYPE", style="bold red", width=20)
+        t_nikto.add_column("DETAILS / CONSTATATIONS", style="white")
+        t_nikto.add_column("MOTEUR", style="bold yellow", width=22)
 
-        console.print(f"  [bold green][+][/bold green] [bold white]Serveur HTTP :[/bold white] {header_res['server']}")
-        console.print(f"  [bold green][+][/bold green] [bold white]Techno       :[/bold white] {header_res['powered_by']}")
-        console.print(f"  [bold green][+][/bold green] [bold white]En-tetes Securite Presents  :[/bold white] {len(header_res['present_security_headers'])}")
-        console.print(f"  [bold yellow][!][/bold yellow] [bold white]En-tetes Securite Manquants :[/bold white] {len(header_res['missing_security_headers'])}\n")
+        if nikto_res:
+            for item in nikto_res[:8]:
+                t_nikto.add_row(item["type"], item["finding"], item["engine"])
+            console.print(t_nikto)
+        else:
+            console.print("    [bold green][V] Aucune vulnÃ©rabilitÃ© applicative majeure relevÃ©e.[/bold green]")
 
-        # 2. Fuzzing de rÃ©pertoires
-        with console.status("[bold cyan]Fuzzing des chemins & repertoires caches...", spinner="bouncingBar"):
-            discovered_paths = fuzz_directories(self.target)
+        # 2. Audit Sqlmap
+        console.print("\n  [bold cyan][+][/bold cyan] Test de vulnÃ©rabilitÃ© aux injections SQL (Sqlmap / Fuzzer)...")
+        with console.status("[bold green]Recherche de failles d'injection SQL...", spinner="bouncingBar"):
+            sql_res = run_sqlmap_scan(self.target)
+
+        t_sql = Table(title="[bold gold1]TESTS D'INJECTION SQL (SQLi)[/bold gold1]", border_style="bright_blue")
+        t_sql.add_column("TYPE", style="bold red", width=20)
+        t_sql.add_column("RESULTAT / INJECTION", style="white")
+        t_sql.add_column("MOTEUR", style="bold yellow", width=22)
+
+        if sql_res:
+            for item in sql_res[:8]:
+                t_sql.add_row(item["type"], item["finding"], item["engine"])
+            console.print(t_sql)
+        else:
+            console.print("    [bold green][V] Aucune injection SQL dÃ©tectÃ©e sur l'URL ciblÃ©e.[/bold green]")
 
         duration = round(time.time() - start_time, 2)
-
-        # 3. Affichage des rÃ©sultats
-        table = Table(
-            title=f"\n[bold gold1]DECOUVERTES FUZZING ({duration}s)[/bold gold1]",
-            header_style="bold magenta",
-            border_style="bright_blue"
-        )
-        table.add_column("CHEMIN", style="cyan")
-        table.add_column("CODE HTTP", style="bold green", justify="center")
-        table.add_column("TAILLE (octets)", style="white", justify="right")
-
-        if discovered_paths:
-            for p in discovered_paths:
-                status_style = "bold green" if p["status"] == 200 else "bold yellow"
-                table.add_row(p["path"], f"[{status_style}]{p['status']}[/{status_style}]", str(p["length"]))
-            console.print(table)
-        else:
-            console.print("[bold yellow][!] Aucun dossier ou fichier sensible detecte.[/bold yellow]")
+        console.print(f"\n[bold green][+] Audit Web terminÃ© en {duration}s.[/bold green]\n")
 
         return {
             "target": self.target,
-            "headers": header_res,
-            "paths": discovered_paths,
-            "scan_duration_sec": duration
+            "nikto_results": nikto_res,
+            "sqlmap_results": sql_res,
+            "duration_sec": duration
         }
