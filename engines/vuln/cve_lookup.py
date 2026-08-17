@@ -7,22 +7,33 @@ import re
 def parse_service_query(query):
     """Extrait la technologie et sa version pour cibler la recherche CVE."""
     query = query.strip()
+    
+    # Ignorer les reponses HTTP generiques sans nom de serveur
+    if query.startswith("HTTP/") or query == "HTTP/1.1 200 OK":
+        return None
+
     if "openssh" in query.lower():
-        match = re.search(r'([0-9]+\.[0-9]+[p0-9]*)', query)
+        match = re.search(r'openssh[_\s]([0-9]+\.[0-9]+)', query, re.IGNORECASE)
         ver = match.group(1) if match else ""
-        return f"OpenSSH {ver}".strip()
+        return f"OpenSSH {ver}".strip() if ver else "OpenSSH"
+        
     elif "apache" in query.lower():
-        match = re.search(r'([0-9]+\.[0-9]+\.[0-9]+)', query)
+        match = re.search(r'apache[/\s]([0-9]+\.[0-9]+\.[0-9]+)', query, re.IGNORECASE)
         ver = match.group(1) if match else ""
-        return f"Apache {ver}".strip()
+        return f"Apache {ver}".strip() if ver else "Apache"
+        
     elif "nginx" in query.lower():
-        match = re.search(r'([0-9]+\.[0-9]+\.[0-9]+)', query)
+        match = re.search(r'nginx[/\s]([0-9]+\.[0-9]+\.[0-9]+)', query, re.IGNORECASE)
         ver = match.group(1) if match else ""
-        return f"Nginx {ver}".strip()
+        return f"Nginx {ver}".strip() if ver else "Nginx"
+        
     return query
 
 def fetch_cves_circl(keyword, max_results=5):
-    """Interroge la base de donnees de vulnÃ©rabilitÃ©s."""
+    """Interroge la base de donnees de vulnerabilites."""
+    if not keyword:
+        return []
+        
     cves = []
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
